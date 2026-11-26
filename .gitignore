@@ -18,3 +18,4 @@ android/key.properties
 android/captures/
 *.keystore
 *.jks
+releases/

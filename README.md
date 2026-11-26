@@ -61,10 +61,21 @@ keyAlias=aloud-release
 storeFile=C:/Users/<you>/.android/aloud-release.jks
 ```
 
-Build a signed release APK with `flutter build apk --release`; the output is
+Build the repository's smaller ARM64 release with:
+
+```powershell
+flutter build apk --release --target-platform android-arm64 --split-per-abi
+```
+
+The checked-in distributable is `releases/aloud-v0.1.0-arm64.apk`. It is for
+64-bit ARM Android devices. The Gradle setting keeps split APK version codes
+equal to the build number in `pubspec.yaml`, so future releases stay
+upgrade-compatible. For a universal APK covering ARM and x86 devices, run
+`flutter build apk --release`; the output is
 `build/app/outputs/flutter-apk/app-release.apk`. Before each update, increment
-the build number after `+` in `pubspec.yaml`. To print the public SHA-256
-certificate fingerprint, run:
+the build number after `+` in `pubspec.yaml`.
+
+To print the public SHA-256 certificate fingerprint, run:
 
 ```powershell
 keytool -list -v -keystore "$HOME\.android\aloud-release.jks" -alias aloud-release
@@ -72,7 +83,7 @@ keytool -list -v -keystore "$HOME\.android\aloud-release.jks" -alias aloud-relea
 
 The release certificate created for this checkout has SHA-256 fingerprint
 `C3:EE:40:9C:73:79:3C:57:BD:3F:D1:48:F0:C8:5B:99:D9:01:39:E9:AF:DE:F9:97:81:21:43:87:DE:7D:20:17`.
-Keep the keystore that matches this fingerprint for all future updates.
+Keep the keystore that matches this fingerprint for all future updates. See [`docs/RELEASING.md`](docs/RELEASING.md) for automated GitHub Actions releases and step-by-step update procedures.
 
 ## What you get
 

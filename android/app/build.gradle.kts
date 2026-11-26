@@ -76,6 +76,11 @@ flutter {
 
 dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
+    // The ML Kit Flutter plugin declares these optional recognizers compile-only.
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
 }
 
 val validateReleaseSigning = tasks.register("validateReleaseSigning") {
