@@ -1,0 +1,4 @@
+storePassword=replace-with-keystore-password
+keyPassword=replace-with-key-password
+keyAlias=aloud-release
+storeFile=C:/path/to/aloud-release.jks

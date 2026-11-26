@@ -1,0 +1,194 @@
+package dev.aloud.aloud
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.OpenableColumns
+import com.ryanheise.audioservice.AudioServiceActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.FilterInputStream
+import java.io.IOException
+import java.io.InputStream
+import java.util.concurrent.Executors
+
+/**
+ * The only native code in Aloud. Two jobs, both exposed on one channel
+ * (`dev.aloud/native`, documented in `lib/core/platform/native_bridge.dart`):
+ *
+ *  1. Receive "Share"/"Open with" intents, copying content:// streams into the
+ *     app cache so Dart can read them as ordinary files.
+ *  2. Extract large `.tar.bz2` voice-model archives on a background thread
+ *     (hundreds of MB; far too big to decompress in Dart memory).
+ */
+class MainActivity : AudioServiceActivity() {
+    private val channelName = "dev.aloud/native"
+    private var channel: MethodChannel? = null
+    private val pending = mutableListOf<Map<String, String>>()
+    private val io = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+        channel = ch
+        ch.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "takeSharedItems" -> {
+                    val out = synchronized(pending) {
+                        val copy = ArrayList(pending)
+                        pending.clear()
+                        copy
+                    }
+                    result.success(out)
+                }
+                "extractTarBz2" -> {
+                    val archive = call.argument<String>("archive")
+                    val dest = call.argument<String>("dest")
+                    if (archive == null || dest == null) {
+                        result.error("args", "archive and dest are required", null)
+                        return@setMethodCallHandler
+                    }
+                    io.execute {
+                        try {
+                            extractTarBz2(archive, dest)
+                            main.post { result.success(true) }
+                        } catch (e: Exception) {
+                            main.post { result.error("extract", e.message, null) }
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+        collectShares(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        collectShares(intent)
+    }
+
+    // ── Share / open-with ──────────────────────────────────────────────────
+
+    private fun collectShares(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action ?: return
+        val uris = mutableListOf<Uri>()
+        var text: String? = null
+        when (action) {
+            Intent.ACTION_SEND -> {
+                @Suppress("DEPRECATION")
+                val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                if (stream != null) uris.add(stream)
+                text = intent.getStringExtra(Intent.EXTRA_TEXT)
+            }
+            Intent.ACTION_SEND_MULTIPLE -> {
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.addAll(it) }
+            }
+            Intent.ACTION_VIEW -> intent.data?.let { uris.add(it) }
+            else -> return
+        }
+        // Consume so a rotation / re-delivery doesn't import the same thing twice.
+        intent.action = null
+
+        if (!text.isNullOrBlank()) {
+            synchronized(pending) { pending.add(mapOf("text" to text!!)) }
+            notifyDart()
+        }
+        for (uri in uris) {
+            io.execute {
+                try {
+                    val name = displayName(uri)
+                    val dir = File(cacheDir, "shared").apply { mkdirs() }
+                    val dest = File(dir, "${System.currentTimeMillis()}_$name")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        FileOutputStream(dest).use { output -> input.copyTo(output, 1 shl 16) }
+                    }
+                    synchronized(pending) { pending.add(mapOf("path" to dest.absolutePath, "name" to name)) }
+                    notifyDart()
+                } catch (_: Exception) {
+                    // Unreadable stream: ignore; the user can import it manually.
+                }
+            }
+        }
+    }
+
+    private fun notifyDart() {
+        main.post { channel?.invokeMethod("sharedItemsAvailable", null) }
+    }
+
+    private fun displayName(uri: Uri): String {
+        if (uri.scheme == "content") {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (i >= 0) c.getString(i)?.let { return it }
+                }
+            }
+        }
+        return uri.lastPathSegment?.substringAfterLast('/') ?: "shared"
+    }
+
+    // ── tar.bz2 extraction ─────────────────────────────────────────────────
+
+    private class CountingInput(
+        input: InputStream,
+        private val onBytes: (Long) -> Unit,
+    ) : FilterInputStream(input) {
+        private var total = 0L
+        private var reported = 0L
+
+        private fun add(n: Int) {
+            if (n <= 0) return
+            total += n
+            if (total - reported >= (1 shl 20)) {
+                reported = total
+                onBytes(total)
+            }
+        }
+
+        override fun read(): Int = super.read().also { if (it >= 0) add(1) }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { add(it) }
+    }
+
+    private fun extractTarBz2(archivePath: String, destPath: String) {
+        val dest = File(destPath).apply { mkdirs() }
+        val destCanonical = dest.canonicalPath
+        FileInputStream(archivePath).use { fis ->
+            val counting = CountingInput(BufferedInputStream(fis, 1 shl 16)) { n ->
+                main.post { channel?.invokeMethod("extractProgress", n) }
+            }
+            BZip2CompressorInputStream(counting, true).use { bz ->
+                TarArchiveInputStream(bz).use { tar ->
+                    var entry: TarArchiveEntry? = tar.nextEntry
+                    while (entry != null) {
+                        val out = File(dest, entry.name)
+                        val canonical = out.canonicalPath
+                        // Refuse archive entries that would escape the target folder.
+                        if (canonical != destCanonical && !canonical.startsWith(destCanonical + File.separator)) {
+                            throw IOException("Blocked unsafe path in archive: ${entry.name}")
+                        }
+                        if (entry.isDirectory) {
+                            out.mkdirs()
+                        } else {
+                            out.parentFile?.mkdirs()
+                            FileOutputStream(out).use { tar.copyTo(it, 1 shl 16) }
+                        }
+                        entry = tar.nextEntry
+                    }
+                }
+            }
+        }
+    }
+}

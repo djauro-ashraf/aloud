@@ -1,0 +1,13 @@
+name: aloud_core
+description: >-
+  Pure-Dart domain logic for Aloud: text segmentation, speech normalisation,
+  rules, PDF clean-up and reading models. No Flutter, no I/O, fully testable.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
