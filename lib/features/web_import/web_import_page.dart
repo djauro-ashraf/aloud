@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../app/core_providers.dart';
 import '../../core/ui/widgets.dart';
@@ -13,6 +11,7 @@ import '../../data/import/article_extractor.dart';
 import '../../data/import/import_exception.dart';
 import '../../data/import/web_fetcher.dart';
 import '../library/library_actions.dart';
+import 'browser_page.dart';
 import 'web_import_service.dart';
 
 /// Paste a link → see what will be saved → save one page or a run of chapters.
@@ -82,19 +81,30 @@ class _WebImportPageState extends ConsumerState<WebImportPage> {
 
   Future<void> _openBrowser() async {
     final uri = WebFetcher.parseUrl(_url.text);
-    final result = await context.push<({String html, String url})>('/browser?url=${Uri.encodeComponent(uri?.toString() ?? 'https://')}');
+    final query = {
+      'url': uri?.toString() ?? 'https://',
+      if (widget.shelfId != null) 'shelf': widget.shelfId!,
+    };
+    final result = await context.push<BrowserResult>(Uri(path: '/browser', queryParameters: query).toString());
     if (result == null || !mounted) return;
-    try {
-      final a = ref.read(webImportServiceProvider).fromHtml(result.html, Uri.parse(result.url));
-      setState(() {
-        _url.text = result.url;
-        _article = a;
-        _title.text = a.title;
-        _chapters = 1;
-        _error = null;
-      });
-    } on ImportException catch (e) {
-      setState(() => _error = e.message);
+    switch (result) {
+      case BrowserSaved(:final book, :final chapters):
+        // The chapters are already in the library; there is nothing left to do here.
+        context.snack('Saved $chapters ${chapters == 1 ? 'chapter' : 'chapters'} to “${book.title}”');
+        context.pop();
+      case BrowserPageChosen(:final html, :final url):
+        try {
+          final a = ref.read(webImportServiceProvider).fromHtml(html, Uri.parse(url));
+          setState(() {
+            _url.text = url;
+            _article = a;
+            _title.text = a.title;
+            _chapters = 1;
+            _error = null;
+          });
+        } on ImportException catch (e) {
+          setState(() => _error = e.message);
+        }
     }
   }
 
@@ -161,7 +171,7 @@ class _WebImportPageState extends ConsumerState<WebImportPage> {
               OutlinedButton.icon(
                 onPressed: _busy ? null : _openBrowser,
                 icon: const Icon(Icons.public),
-                label: const Text('Browser view'),
+                label: const Text('Browse & save'),
               ),
             ],
           ),
@@ -225,80 +235,6 @@ class _WebImportPageState extends ConsumerState<WebImportPage> {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-/// In-app browser for pages that need JavaScript, logins or a captcha. Once
-/// the page shows the text you want, "Use this page" hands its HTML back.
-class BrowserPage extends StatefulWidget {
-  const BrowserPage({super.key, required this.url});
-
-  final String url;
-
-  @override
-  State<BrowserPage> createState() => _BrowserPageState();
-}
-
-class _BrowserPageState extends State<BrowserPage> {
-  late final WebViewController _web;
-  int _progress = 0;
-  String _title = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _web = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onProgress: (p) => setState(() => _progress = p),
-        onPageFinished: (_) async {
-          final t = await _web.getTitle();
-          if (mounted) setState(() => _title = t ?? '');
-        },
-      ))
-      ..loadRequest(Uri.parse(widget.url));
-  }
-
-  Future<void> _use() async {
-    final raw = await _web.runJavaScriptReturningResult('document.documentElement.outerHTML');
-    final url = await _web.currentUrl() ?? widget.url;
-    var html = raw is String ? raw : '$raw';
-    // Android returns the string JSON-encoded.
-    if (html.startsWith('"')) {
-      try {
-        html = jsonDecode(html) as String;
-      } on FormatException {
-        // Keep the raw value.
-      }
-    }
-    if (mounted) context.pop((html: html, url: url));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(_title.isEmpty ? 'Browser' : _title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _web.reload),
-          FilledButton(onPressed: _use, child: const Text('Use this page')),
-          const SizedBox(width: 12),
-        ],
-        bottom: _progress < 100 ? PreferredSize(preferredSize: const Size.fromHeight(2), child: LinearProgressIndicator(value: _progress / 100)) : null,
-      ),
-      body: PopScope(
-        canPop: false,
-        onPopInvokedWithResult: (didPop, _) async {
-          if (didPop) return;
-          if (await _web.canGoBack()) {
-            await _web.goBack();
-          } else if (context.mounted) {
-            context.pop();
-          }
-        },
-        child: WebViewWidget(controller: _web),
       ),
     );
   }

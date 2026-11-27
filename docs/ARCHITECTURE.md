@@ -77,11 +77,27 @@ One Kotlin file (`MainActivity.kt`), one channel (`dev.aloud/native`), documente
 `content://` streams into the cache) and extract `.tar.bz2` voice models on a
 background thread.
 
+## Highlighting
+
+* **Text view** marks the sentence at `ReadingState.cursor`; the word comes from
+  `wordCursorProvider`, a separate provider because it changes several times a
+  second and only the paragraph being read should rebuild for it.
+* **Word positions** exist only where an engine can report them. The narrator
+  subscribes to `SpokenOffsetSource.spokenOffsets` for the item being spoken
+  (the device voice) and maps the offset in the text sent to the voice back to a
+  displayed word (`SpokenWordMap` — "42" spoken as "forty two" still marks "42").
+  Clip-based engines implement nothing, so they are sentence-level by design.
+* **PDF pages**: the reader speaks cleaned text, so `PdfBlockAligner` finds each
+  block's words in the PDF's own text layer (tolerating removed headers,
+  re-joined hyphenation, page breaks), `PdfGeometry` turns that into rectangles
+  from the engine's per-character bounds, and a `CustomPaint` page overlay draws
+  them. Everything up to the rectangles is pure Dart in `aloud_core`.
+
 ## Testing
 
 | Layer | How |
 |---|---|
-| `aloud_core` | `dart test` — sentence splitter, normaliser, rules, PDF clean-up, WAV, batching… |
+| `aloud_core` | `dart test` — sentence splitter, normaliser, rules, PDF clean-up and page matching, word mapping, WAV, batching… |
 | Importers | real EPUB built in memory; real HTML fixtures |
 | Narrator | fake `SpeechBackend` (pause/resume, jumps, rules, errors, fallback) |
 | Widgets | smoke tests for shared widgets and the lock screen |

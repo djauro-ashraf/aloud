@@ -116,6 +116,21 @@ final class ReadingState {
 
 final readingProvider = NotifierProvider<ReadingController, ReadingState>(ReadingController.new);
 
+/// Index of the word the device voice is on, within the sentence at
+/// [ReadingState.cursor]; null whenever no word is known (every neural
+/// engine, or between sentences).
+///
+/// Kept apart from [ReadingState] on purpose: it changes several times a
+/// second, and only the widgets that draw the word should rebuild for it.
+final wordCursorProvider = NotifierProvider<WordCursor, int?>(WordCursor.new);
+
+class WordCursor extends Notifier<int?> {
+  @override
+  int? build() => null;
+
+  void set(int? word) => state = word;
+}
+
 /// Owns the open document and its [Narrator].
 ///
 /// It is app-scoped on purpose: playback continues when the reader screen is
@@ -373,6 +388,14 @@ class ReadingController extends Notifier<ReadingState> {
     await seekToSentence(i, play: true);
   }
 
+  /// Opens [section] and reads from [sentence] — used when a tap on a PDF
+  /// page lands in a different chapter than the one loaded.
+  Future<void> readFrom(int section, int sentence) async {
+    if (!state.hasDoc || section < 0 || section >= state.sectionCount) return;
+    if (section == state.section) return seekToSentence(sentence, play: true);
+    await _loadSection(section, sentence: sentence, play: true);
+  }
+
   Future<void> nextSentence() => _narrator.nextSentence();
   Future<void> previousSentence() => _narrator.previousSentence();
   Future<void> nextParagraph() => _narrator.nextParagraph();
@@ -450,8 +473,11 @@ class ReadingController extends Notifier<ReadingState> {
   void _onEvent(NarratorEvent e) {
     switch (e) {
       case CursorEvent(:final index):
+        ref.read(wordCursorProvider.notifier).set(null);
         state = state.copyWith(cursor: index);
         _saver.run(() => unawaited(_savePosition()));
+      case WordEvent(:final sentence, :final word):
+        if (sentence == state.cursor) ref.read(wordCursorProvider.notifier).set(word);
       case StatusEvent(:final status):
         state = state.copyWith(status: status);
         _publishMedia();

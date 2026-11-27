@@ -16,6 +16,17 @@ final class CursorEvent extends NarratorEvent {
   final int index;
 }
 
+/// The voice reached a word of the sentence being read. Published only by
+/// engines that know word positions (see [SpokenOffsetSource]).
+final class WordEvent extends NarratorEvent {
+  const WordEvent(this.sentence, this.word);
+
+  final int sentence;
+
+  /// Index of the word within the sentence as displayed.
+  final int word;
+}
+
 final class StatusEvent extends NarratorEvent {
   const StatusEvent(this.status);
   final NarratorStatus status;
@@ -329,6 +340,7 @@ final class Narrator {
     // then hint what comes next.
     final speaking = backend.speak(item, speed: _effectiveSpeed(plan.restoreSpeed ? plan.speedDelta : 0));
     unawaited(backend.prefetch(_upcoming(voice, fingerprint)));
+    final words = _followWords(backend, plan, token);
     try {
       final outcome = await speaking;
       return outcome == SpeakOutcome.completed && _alive(token);
@@ -340,7 +352,27 @@ final class Narrator {
         await backend.stop();
       }
       return false;
+    } finally {
+      await words?.cancel();
     }
+  }
+
+  /// Publishes a [WordEvent] each time the voice enters a new displayed word.
+  /// Returns null for engines that cannot report word positions.
+  StreamSubscription<int>? _followWords(SpeechBackend backend, SpeechPlan plan, int token) {
+    if (backend case final SpokenOffsetSource source) {
+      final map = SpokenWordMap.fromPlan(plan);
+      if (map.isEmpty) return null;
+      final sentence = _cursor;
+      var last = -1;
+      return source.spokenOffsets.listen((offset) {
+        final word = map.originalWordAt(offset);
+        if (word == null || word == last || !_alive(token) || _events.isClosed) return;
+        last = word;
+        _events.add(WordEvent(sentence, word));
+      });
+    }
+    return null;
   }
 
   List<SpeechItem> _upcoming(VoiceInfo voice, String fingerprint) =>

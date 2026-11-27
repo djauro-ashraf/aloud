@@ -9,15 +9,17 @@ import 'speech_backend.dart';
 ///
 /// Always available, instant, works offline — which is why it is also the
 /// automatic fallback when a network or neural engine fails.
-final class SystemSpeechBackend implements SpeechBackend {
+final class SystemSpeechBackend implements SpeechBackend, SpokenOffsetSource {
   SystemSpeechBackend() {
     _tts
       ..setCompletionHandler(() => _finish(SpeakOutcome.completed))
       ..setCancelHandler(() => _finish(SpeakOutcome.cancelled))
-      ..setErrorHandler((Object? message) => _fail('$message'));
+      ..setErrorHandler((Object? message) => _fail('$message'))
+      ..setProgressHandler(_onProgress);
   }
 
   final FlutterTts _tts = FlutterTts();
+  final _offsets = StreamController<int>.broadcast();
   Completer<SpeakOutcome>? _current;
   String? _appliedVoice;
   bool _disposed = false;
@@ -29,6 +31,15 @@ final class SystemSpeechBackend implements SpeechBackend {
   /// and the narrator re-speaks the sentence on resume.
   @override
   bool get pausesInPlace => false;
+
+  @override
+  Stream<int> get spokenOffsets => _offsets.stream;
+
+  /// The OS reports the start of every word. Late events from an utterance
+  /// that was just stopped are ignored.
+  void _onProgress(String text, int start, int end, String word) {
+    if (_current != null && !_offsets.isClosed) _offsets.add(start);
+  }
 
   void _finish(SpeakOutcome outcome) {
     final c = _current;
@@ -102,6 +113,7 @@ final class SystemSpeechBackend implements SpeechBackend {
   Future<void> dispose() async {
     _disposed = true;
     await stop();
+    await _offsets.close();
   }
 
   /// Installed voices as `name|locale` ids.

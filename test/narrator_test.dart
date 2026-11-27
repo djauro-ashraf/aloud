@@ -69,6 +69,27 @@ class FakeBackend implements SpeechBackend {
   Future<void> dispose() async {}
 }
 
+/// A device-voice stand-in: announces the start of every word it speaks.
+class WordReportingBackend extends FakeBackend implements SpokenOffsetSource {
+  WordReportingBackend() : super(kind: EngineKind.system);
+
+  final _offsets = StreamController<int>.broadcast();
+
+  @override
+  Stream<int> get spokenOffsets => _offsets.stream;
+
+  @override
+  Future<SpeakOutcome> speak(SpeechItem item, {required double speed}) {
+    final done = super.speak(item, speed: speed);
+    scheduleMicrotask(() {
+      for (final m in RegExp(r'\S+').allMatches(item.text)) {
+        _offsets.add(m.start);
+      }
+    });
+    return done;
+  }
+}
+
 const _voice = VoiceInfo(engine: EngineKind.edge, id: 'v', name: 'V');
 
 ReaderSection section(List<String> paras) => ReaderSection(
@@ -95,6 +116,36 @@ Future<void> until(bool Function() cond, {int ms = 2000}) async {
 }
 
 void main() {
+  group('Narrator word events', () {
+    Future<List<WordEvent>> wordsFor(FakeBackend b, String text) async {
+      final s = section([text]);
+      final n = make(b, s, prefetch: 0);
+      final words = <WordEvent>[];
+      n.events.where((e) => e is WordEvent).cast<WordEvent>().listen(words.add);
+      await n.load(s, SectionIndex.build(s));
+      await n.play();
+      await until(() => n.status == NarratorStatus.ended);
+      await n.dispose();
+      return words;
+    }
+
+    test('device voice: one event per displayed word, in order', () async {
+      final words = await wordsFor(WordReportingBackend(), 'Hello big world.');
+      expect(words.map((w) => w.word).toList(), [0, 1, 2]);
+      expect(words.every((w) => w.sentence == 0), isTrue);
+    });
+
+    test('a number spoken as a word still highlights the displayed digit', () async {
+      final words = await wordsFor(WordReportingBackend(), 'I have 3 cats.');
+      // spoken: "I have three cats." -> displayed words 0,1,2,3
+      expect(words.map((w) => w.word).toList(), [0, 1, 2, 3]);
+    });
+
+    test('neural engine publishes no word events (sentence level only)', () async {
+      final words = await wordsFor(FakeBackend(), 'Hello big world.');
+      expect(words, isEmpty);
+    });
+  });
   group('Narrator', () {
     test('reads every sentence in order, emits cursor and end', () async {
       final b = FakeBackend();

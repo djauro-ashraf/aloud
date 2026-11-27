@@ -57,6 +57,18 @@ final class WebImportService {
     return out;
   }
 
+  /// Saves [article] as the next chapter of [book], or as the first chapter
+  /// of a new book when there is none (or it has been deleted meanwhile).
+  /// Returns the book it now belongs to.
+  Future<Doc> saveChapter(Doc? book, WebArticle article, {String? shelfId}) async {
+    final importer = _ref.read(servicesProvider).importer;
+    if (book != null) {
+      final updated = await importer.appendArticles(book, [article]);
+      if (updated != null) return updated;
+    }
+    return importer.importArticles([article], shelfId: shelfId);
+  }
+
   /// Fetches up to [count] chapters after the last saved one and appends them.
   /// Returns the updated document, or `null` if there is nothing more.
   Future<Doc?> appendNext(Doc doc, {int count = 3}) async {

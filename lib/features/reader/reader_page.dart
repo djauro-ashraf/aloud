@@ -12,7 +12,10 @@ import '../../core/prefs.dart';
 import '../../core/ui/widgets.dart';
 import '../../data/models/models.dart';
 import '../comics/comic_reader_view.dart';
+import '../web_import/browser_page.dart';
 import '../web_import/web_import_service.dart';
+import 'highlight_sheet.dart';
+import 'pdf_reader_view.dart';
 import 'player_bar.dart';
 import 'reader_sheets.dart';
 import 'reading_controller.dart';
@@ -72,16 +75,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     ref.listen<bool>(readingProvider.select((s) => s.doc == null && !s.loading), (prev, closed) {
       if (prev == false && closed && context.canPop()) context.pop();
     });
-    // Keep the PDF page in step with the spoken sentence.
-    ref.listen<int?>(readingProvider.select((s) => s.cursorBlock), (_, block) {
-      final s = ref.read(readingProvider);
-      if (block == null || doc?.kind != DocKind.pdf || !_pageMode || !s.isPlaying) return;
-      final page = s.content?.blocks[block].page;
-      if (page != null && _pdf.isReady && _pdf.pageNumber != page + 1) {
-        unawaited(_pdf.goToPage(pageNumber: page + 1));
-      }
-    });
-
     if (doc == null) {
       return Scaffold(
         appBar: AppBar(),
@@ -92,7 +85,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
 
     final s = ref.watch(readingProvider);
     final isPdf = doc.kind == DocKind.pdf;
-    final showPages = isPdf && _pageMode;
+    // Translated speech no longer matches the printed page, so show the text.
+    final showPages = isPdf && _pageMode && !s.translated;
 
     return Scaffold(
       appBar: AppBar(
@@ -117,7 +111,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               icon: const Icon(Icons.list),
               onPressed: () => showChaptersSheet(context),
             ),
-          if (!showPages)
+          if (showPages)
+            IconButton(
+              tooltip: 'Highlight & tapping',
+              icon: const Icon(Icons.highlight),
+              onPressed: () => showHighlightSheet(context, pdf: true),
+            )
+          else
             IconButton(
               tooltip: 'Appearance',
               icon: const Icon(Icons.text_fields),
@@ -138,52 +138,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
               const PopupMenuItem(value: 'translation', child: Text('Translation settings')),
               if (doc.kind == DocKind.web && doc.nextUrl != null)
                 const PopupMenuItem(value: 'more', child: Text('Fetch more chapters')),
+              if (doc.kind == DocKind.web && (doc.nextUrl ?? doc.sourceUrl) != null)
+                const PopupMenuItem(value: 'browse', child: Text('Browse & add chapters')),
               if (doc.sourceUrl != null) const PopupMenuItem(value: 'open', child: Text('Open original page')),
             ],
           ),
         ],
       ),
-      body: showPages ? _pdfPages(doc) : const TextReaderView(bottomPadding: 40),
-      floatingActionButton: showPages
-          ? FloatingActionButton.extended(
-              onPressed: () => _readFromPage(doc),
-              icon: const Icon(Icons.record_voice_over),
-              label: const Text('Read from this page'),
-            )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      body: showPages ? PdfReaderView(doc: doc, controller: _pdf) : const TextReaderView(bottomPadding: 40),
       bottomNavigationBar: _fetching ? const LinearProgressIndicator() : const PlayerBar(),
     );
-  }
-
-  Widget _pdfPages(Doc doc) {
-    final path = ref.read(servicesProvider).paths.sourceFile(doc.id, 'source.pdf').path;
-    return PdfViewer.file(
-      path,
-      controller: _pdf,
-      initialPageNumber: 1,
-      params: const PdfViewerParams(),
-    );
-  }
-
-  /// Starts listening at the first sentence on the visible PDF page.
-  Future<void> _readFromPage(Doc doc) async {
-    final page = (_pdf.pageNumber ?? 1) - 1;
-    final ctrl = ref.read(readingProvider.notifier);
-    var s = ref.read(readingProvider);
-    // Without chapter headings the sections are fixed page ranges.
-    const perSection = 25;
-    final guess = page ~/ perSection;
-    if (s.content?.blocks.any((b) => b.page == page) != true && guess < s.sectionCount && guess != s.section) {
-      await ctrl.goToSection(guess);
-      s = ref.read(readingProvider);
-    }
-    final i = s.index?.firstSentenceOnPage(s.content!, page);
-    if (i == null) {
-      if (mounted) context.snack('No readable text on this page.');
-      return;
-    }
-    await ctrl.seekToSentence(i, play: true);
   }
 
   Future<void> _onMenu(String v, Doc doc) async {
@@ -197,6 +161,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       case 'open':
         final u = Uri.tryParse(doc.sourceUrl ?? '');
         if (u != null) await launchUrl(u, mode: LaunchMode.externalApplication);
+      case 'browse':
+        // Opens the site at the next chapter; whatever is saved there joins this book.
+        final start = doc.nextUrl ?? doc.sourceUrl!;
+        await context.push<BrowserResult>(
+          Uri(path: '/browser', queryParameters: {'url': start, 'book': doc.id}).toString(),
+        );
+        if (mounted) await ref.read(readingProvider.notifier).reloadDocMeta();
       case 'more':
         setState(() => _fetching = true);
         try {

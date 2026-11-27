@@ -3,7 +3,7 @@ description: >-
   Aloud — listen to anything. A text-to-speech reader for books, PDFs, web
   novels and comics with natural voices, smart text clean-up and offline use.
 publish_to: none
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.13.3

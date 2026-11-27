@@ -33,6 +33,18 @@ final class SpeechException implements Exception {
   String toString() => message;
 }
 
+/// An engine that can tell *where* in the text it currently is.
+///
+/// Only the device voice really knows: it announces each word as it reaches
+/// it. Neural engines synthesise a whole sentence into one audio clip and play
+/// it back, so they have no honest word position and do not implement this —
+/// the reader highlights those at sentence level rather than guessing.
+abstract interface class SpokenOffsetSource {
+  /// Character offsets into the text of the item being spoken, one per word
+  /// the voice starts. Silent between items.
+  Stream<int> get spokenOffsets;
+}
+
 /// Something that can speak text aloud.
 ///
 /// Two families implement this: *direct* engines that speak through the OS

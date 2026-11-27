@@ -10,6 +10,7 @@ import '../features/rules/rule_templates_page.dart';
 import '../features/rules/rules_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/translate/translation_settings_page.dart';
+import '../features/web_import/browser_page.dart';
 import '../features/web_import/web_import_page.dart';
 
 /// Navigator of the whole app; lets code outside the widget tree (share
@@ -50,7 +51,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/browser',
-        builder: (_, state) => BrowserPage(url: state.uri.queryParameters['url'] ?? 'https://'),
+        builder: (_, state) => BrowserPage(
+          url: state.uri.queryParameters['url'] ?? 'https://',
+          shelfId: state.uri.queryParameters['shelf'],
+          bookId: state.uri.queryParameters['book'],
+        ),
       ),
     ],
   );

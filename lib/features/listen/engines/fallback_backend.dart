@@ -9,7 +9,7 @@ import 'speech_backend.dart';
 /// After [failureThreshold] consecutive failures the primary is considered
 /// unhealthy and skipped for [cooldown], which avoids paying a slow timeout
 /// on every sentence while offline.
-final class FallbackSpeechBackend implements SpeechBackend {
+final class FallbackSpeechBackend implements SpeechBackend, SpokenOffsetSource {
   FallbackSpeechBackend({
     required this._primary,
     required this._fallback,
@@ -42,6 +42,14 @@ final class FallbackSpeechBackend implements SpeechBackend {
 
   @override
   bool get pausesInPlace => _current.pausesInPlace;
+
+  /// Word positions exist only while the device voice is the one speaking
+  /// (the usual fallback); the primary neural engine reports none.
+  @override
+  Stream<int> get spokenOffsets => switch (_fallback) {
+        final SpokenOffsetSource source => source.spokenOffsets,
+        _ => const Stream<int>.empty(),
+      };
 
   bool get _primaryHealthy {
     final until = _unhealthyUntil;

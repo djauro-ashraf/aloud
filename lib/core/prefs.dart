@@ -34,6 +34,20 @@ abstract final class Prefs {
   static const autoScroll = Pref<bool>('autoScroll', true);
   static const keepScreenOn = Pref<bool>('keepScreenOn', true);
 
+  // Highlighting and tapping (see highlight.dart)
+  static const highlightMode = Pref<String>('highlightMode', 'auto'); // auto|sentence|word|off
+  static const wordStyle = Pref<String>('wordStyle', 'soft'); // soft|strong|underline
+  static const tapToRead = Pref<String>('tapToRead', 'double'); // double|single|off
+  static const pdfHighlightColor = Pref<int>('pdfHighlightColor', 0xFFE53935);
+  static const pdfHighlightThickness = Pref<double>('pdfHighlightThickness', 3);
+  static const pdfHighlightPadH = Pref<double>('pdfHighlightPadH', 2);
+  static const pdfHighlightPadV = Pref<double>('pdfHighlightPadV', 3);
+  static const pdfHighlightOffsetY = Pref<double>('pdfHighlightOffsetY', 0);
+  static const seenTapHint = Pref<bool>('seenTapHint', false);
+
+  // Web
+  static const browserAutoNext = Pref<bool>('browserAutoNext', false);
+
   // Listening
   static const engine = Pref<String>('engine', 'system'); // EngineKind.name
   static const voiceKey = Pref<String>('voiceKey', '');

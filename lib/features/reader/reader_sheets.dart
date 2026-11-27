@@ -7,6 +7,7 @@ import '../../core/prefs.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/ui/widgets.dart';
 import '../../core/util/format.dart';
+import 'highlight_sheet.dart';
 import 'reading_controller.dart';
 
 // ── Chapters ──────────────────────────────────────────────────────────────
@@ -139,6 +140,12 @@ Future<void> showAppearanceSheet(BuildContext context) {
                   title: const Text('Keep screen on'),
                   value: ref.pref(Prefs.keepScreenOn),
                   onChanged: (v) => ref.setPref(Prefs.keepScreenOn, v),
+                ),
+                ListTile(
+                  title: const Text('Highlight & tapping'),
+                  subtitle: const Text('What is marked while listening, and how to start from a sentence'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => showHighlightSheet(ctx, pdf: false),
                 ),
                 const SizedBox(height: 12),
               ],
